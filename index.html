@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>四级备考 · 60 天计划与每日任务</title>
+<meta name="description" content="大学英语四级备考网站：按天生成词汇、听力、阅读、写作、翻译、语法任务，支持手机与电脑，进度自动保存并可跨设备同步。">
+<meta name="theme-color" content="#4f7cff">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="四级备考">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="assets/icons/icon-192.png">
+<link rel="stylesheet" href="assets/css/app.css">
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="logo">CET4</div>
+      <div><b>四级备考</b><span>60 天冲刺计划</span></div>
+    </div>
+    <nav>
+      <a href="#/today" data-nav="today"><i>◎</i>今日任务</a>
+      <a href="#/plan" data-nav="plan"><i>▤</i>备考计划</a>
+      <a href="#/practice" data-nav="practice"><i>✎</i>专项练习</a>
+      <a href="#/vocab" data-nav="vocab"><i>A</i>词汇库</a>
+      <a href="#/mock" data-nav="mock"><i>⏱</i>模考中心</a>
+      <a href="#/stats" data-nav="stats"><i>◔</i>学习统计</a>
+      <a href="#/settings" data-nav="settings"><i>⚙</i>设置与同步</a>
+    </nav>
+    <div class="side-foot">
+      <div id="sideCountdown">正在计算…</div>
+      <div style="margin-top:6px">进度保存在本机浏览器，建议开启同步码备份。</div>
+    </div>
+  </aside>
+
+  <div class="main">
+    <header class="topbar">
+      <div>
+        <div class="tb-title" id="tbTitle">今日任务</div>
+        <div class="tb-sub" id="tbSub">正在加载…</div>
+      </div>
+      <div class="spacer"></div>
+      <button class="btn tiny ghost" id="btnToday">回到今天</button>
+      <button class="btn tiny ghost" onclick="location.hash='#/settings'">同步</button>
+    </header>
+    <main id="view" class="view"></main>
+  </div>
+</div>
+
+<nav class="tabbar" id="tabbar">
+  <a href="#/today" data-nav="today"><i>◎</i>今日</a>
+  <a href="#/plan" data-nav="plan"><i>▤</i>计划</a>
+  <a href="#/practice" data-nav="practice"><i>✎</i>练习</a>
+  <a href="#/vocab" data-nav="vocab"><i>A</i>词汇</a>
+  <a href="#/stats" data-nav="stats"><i>◔</i>统计</a>
+</nav>
+
+<script src="assets/js/data-vocab.js"></script>
+<script src="assets/js/data-reading.js"></script>
+<script src="assets/js/data-writing.js"></script>
+<script src="assets/js/data-skills.js"></script>
+<script src="assets/js/util.js"></script>
+<script src="assets/js/libs.js"></script>
+<script src="assets/js/store.js"></script>
+<script src="assets/js/plan.js"></script>
+<script src="assets/js/practice.js"></script>
+<script src="assets/js/practice2.js"></script>
+<script src="assets/js/views.js"></script>
+<script>
+/* 顶栏与侧栏信息刷新 */
+(function () {
+  function paint() {
+    try {
+      var st = Store.get();
+      var left = Math.max(0, U.diffDays(new Date(), U.parseISO(st.examDate)));
+      var idx = Store.todayIndex();
+      var d = Plan.day(idx);
+      var done = d.tasks.filter(function (t) { return Store.isDone(idx, t.idx); }).length;
+      document.getElementById('tbSub').textContent = 'D-' + left + ' · 第 ' + idx + ' 天 · 今日 ' + done + '/' + d.tasks.length + ' 项';
+      document.getElementById('sideCountdown').innerHTML = '距离考试 <b>' + left + '</b> 天 · 连续打卡 ' + Store.streak() + ' 天';
+      var hash = (location.hash || '#/today').replace('#/', '');
+      var map = { today: '今日任务', plan: '备考计划', practice: '专项练习', vocab: '词汇库', mock: '模考中心', stats: '学习统计', settings: '设置与同步', day: '每日详情', task: '任务详情', listen: '听力训练', read: '阅读训练', write: '写作训练', trans: '翻译训练', gram: '语法讲解', skill: '题型技巧' };
+      document.getElementById('tbTitle').textContent = map[hash.split('/')[0]] || '四级备考';
+    } catch (e) {}
+  }
+  window.addEventListener('hashchange', paint);
+  document.getElementById('btnToday').addEventListener('click', function () { location.hash = '#/today'; });
+  document.addEventListener('DOMContentLoaded', function () { setTimeout(paint, 30); });
+  setInterval(paint, 3000);
+})();
+
+/* 离线缓存（需通过 http/https 打开；直接双击打开也能正常使用） */
+if ('serviceWorker' in navigator && location.protocol.indexOf('http') === 0) {
+  window.addEventListener('load', function () {
+    navigator.serviceWorker.register('sw.js').catch(function () {});
+  });
+}
+</script>
+</body>
+</html>
