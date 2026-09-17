@@ -1,5 +1,5 @@
-/* 离线缓存：首次打开后即可断网使用 */
-var CACHE = 'cet4-v2';
+/* 离线缓存：在线时优先取最新版，断网时回退到缓存 */
+var CACHE = 'cet4-v3';
 var FILES = [
   './', './index.html', './manifest.webmanifest',
   './assets/css/app.css',
@@ -10,7 +10,14 @@ var FILES = [
 ];
 
 self.addEventListener('install', function (e) {
-  e.waitUntil(caches.open(CACHE).then(function (c) { return c.addAll(FILES); }).then(function () { return self.skipWaiting(); }));
+  e.waitUntil(
+    caches.open(CACHE).then(function (c) {
+      /* 逐个预热，单个文件失败不影响整体安装 */
+      return Promise.all(FILES.map(function (f) {
+        return c.add(new Request(f, { cache: 'reload' })).catch(function () {});
+      }));
+    }).then(function () { return self.skipWaiting(); })
+  );
 });
 
 self.addEventListener('activate', function (e) {
@@ -24,13 +31,18 @@ self.addEventListener('fetch', function (e) {
   var url = new URL(e.request.url);
   if (url.origin !== location.origin) return; /* 云同步请求不缓存 */
   e.respondWith(
-    caches.match(e.request).then(function (hit) {
-      if (hit) return hit;
-      return fetch(e.request).then(function (res) {
+    fetch(e.request).then(function (res) {
+      if (res && res.status === 200 && res.type === 'basic') {
         var copy = res.clone();
         caches.open(CACHE).then(function (c) { c.put(e.request, copy); });
-        return res;
-      }).catch(function () { return caches.match('./index.html'); });
+      }
+      return res;
+    }).catch(function () {
+      return caches.match(e.request).then(function (hit) {
+        if (hit) return hit;
+        if (e.request.mode === 'navigate') return caches.match('./index.html');
+        return Response.error();
+      });
     })
   );
 });
