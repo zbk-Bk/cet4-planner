@@ -1,5 +1,5 @@
 /* 离线缓存：首次打开后即可断网使用 */
-var CACHE = 'cet4-v1';
+var CACHE = 'cet4-v2';
 var FILES = [
   './', './index.html', './manifest.webmanifest',
   './assets/css/app.css',
