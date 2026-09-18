@@ -1,11 +1,13 @@
 /* 离线缓存：在线时优先取最新版，断网时回退到缓存 */
-var CACHE = 'cet4-v3';
+var CACHE = 'cet4-v4';
 var FILES = [
   './', './index.html', './manifest.webmanifest',
   './assets/css/app.css',
-  './assets/js/data-vocab.js', './assets/js/data-reading.js', './assets/js/data-writing.js',
+  './assets/js/data-vocab.js', './assets/js/data-vocab-full.js', './assets/js/data-reading.js',
+  './assets/js/data-audio.js', './assets/js/data-writing.js',
   './assets/js/data-skills.js', './assets/js/util.js', './assets/js/libs.js', './assets/js/store.js',
-  './assets/js/plan.js', './assets/js/practice.js', './assets/js/practice2.js', './assets/js/views.js',
+  './assets/js/ai.js', './assets/js/plan.js', './assets/js/practice.js', './assets/js/practice2.js',
+  './assets/js/views.js',
   './assets/icons/icon.svg'
 ];
 

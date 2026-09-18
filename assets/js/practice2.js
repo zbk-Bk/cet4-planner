@@ -40,7 +40,63 @@
       '<p class="muted small">提醒：' + U.esc(item.tips) + '</p></div>');
 
     html += sec('自评打分', selfAssess(ctx));
+    html += sec('作文批改（按四级评分细则）', aiSection(item, ctx));
     return html;
+  }
+
+  function aiSection(item, ctx) {
+    var ok = window.AI && AI.ready();
+    var hist = window.AI ? AI.history(6).filter(function (h) { return h.topic === item.id; }) : [];
+    return '<div class="ai-panel" data-ai-panel="' + U.esc(item.id) + '">' +
+      '<div class="row gap">' +
+        '<button class="btn primary" data-ai-grade="' + U.esc(item.id) + '"' + (ok ? '' : ' disabled') + '>AI 批改（DeepSeek）</button>' +
+        '<button class="btn ghost" data-rule-check="' + U.esc(item.id) + '">离线规则检查</button>' +
+        '<span class="muted small">' + (ok ? '将把作文发送给 DeepSeek 批改（模型：' + U.esc((AI.config().model || 'deepseek-chat')) + '）'
+          : '还没配置 API Key，去「设置与同步 → 作文 AI 批改」填入即可启用') + '</span>' +
+      '</div>' +
+      '<details class="rubric"><summary>查看四级写作评分标准（15 分制）</summary><div class="table-wrap"><table class="table"><tbody>' +
+        (window.AI ? AI.rubric : []).map(function (r) { return '<tr><td><b>' + r[0] + '</b></td><td class="ex">' + U.esc(r[1]) + '</td></tr>'; }).join('') +
+      '</tbody></table></div></details>' +
+      '<div data-ai-result class="ai-result">' + (hist.length ? '<p class="muted small">本题上次批改：' + hist[0].at.slice(0, 10) + ' · ' + hist[0].total + ' 分</p>' : '') + '</div>' +
+    '</div>';
+  }
+
+  function renderGrade(d) {
+    var dims = d.dimensions || {};
+    var dimName = { content: '内容与切题', structure: '结构与连贯', language: '语法与句式', vocabulary: '词汇与拼写' };
+    var bars = Object.keys(dimName).map(function (k) {
+      var v = dims[k];
+      if (!v) return '';
+      var pct = (v.score === null || v.score === undefined) ? 0 : Math.round(100 * v.score / (v.max || 1));
+      var val = (v.score === null || v.score === undefined) ? '—' : (v.score + '/' + v.max);
+      return '<div class="dim"><div class="dim-head"><span>' + dimName[k] + '</span><b>' + val + '</b></div>' +
+        '<div class="bar thin"><i style="width:' + pct + '%"></i></div>' +
+        '<p class="muted small">' + U.esc(v.comment || '') + '</p></div>';
+    }).join('');
+
+    var problems = (d.problems || []).map(function (p) {
+      if (typeof p === 'string') return '<li>' + U.esc(p) + '</li>';
+      return '<li>' + (p.quote ? '<span class="quote">' + U.esc(p.quote) + '</span>' : '') +
+        '<p>' + U.esc(p.issue || '') + '</p>' +
+        (p.fix ? '<p class="fix">改成：' + U.esc(p.fix) + '</p>' : '') + '</li>';
+    }).join('');
+
+    return '<div class="grade">' +
+      '<div class="grade-head"><div class="grade-score"><b>' + (d.total === undefined ? '-' : d.total) + '</b><span>/15</span></div>' +
+        '<div><div class="grade-level">' + U.esc(d.level || '') + '</div>' +
+        '<div class="muted small">' + (d.source === 'rules' ? '离线规则检查（未调用 AI，内容分无法判断）'
+          : 'AI 批改 · ' + U.esc(d.model || '') + (d.usage && d.usage.total_tokens ? ' · 本次消耗 ' + d.usage.total_tokens + ' tokens' : '')) +
+        (d.wordCount ? ' · 检测词数 ' + d.wordCount : '') + '</div></div></div>' +
+      '<div class="dims">' + bars + '</div>' +
+      (d.strengths && d.strengths.length ? '<h3 class="sub">做得好的地方</h3><ul class="plain">' +
+        d.strengths.map(function (s) { return '<li>✅ ' + U.esc(s) + '</li>'; }).join('') + '</ul>' : '') +
+      (problems ? '<h3 class="sub">需要修改的地方</h3><ul class="issues">' + problems + '</ul>' : '') +
+      (d.vocabulary && d.vocabulary.length ? '<h3 class="sub">建议升级的表达</h3><div class="chips">' +
+        d.vocabulary.map(function (v) { return '<span class="pill static">' + U.esc(v) + '</span>'; }).join('') + '</div>' : '') +
+      (d.rewrite ? '<h3 class="sub">参考改写（保持你的观点）</h3><div class="passage en">' +
+        U.esc(d.rewrite).split('\n\n').map(function (p) { return '<p>' + p + '</p>'; }).join('') + '</div>' : '') +
+      (d.nextStep ? '<p class="next-step"><b>下一步：</b>' + U.esc(d.nextStep) + '</p>' : '') +
+    '</div>';
   }
 
   function selfAssess(ctx) {
@@ -148,9 +204,7 @@
     var root = document.getElementById('view');
     var st = Store.get();
 
-    U.on(root, 'click', '[data-say]', function (e, el) {
-      U.speak(el.getAttribute('data-say'), { rate: st.settings.ttsRate, voiceName: st.settings.voiceName });
-    });
+    P.bindWordTools(root);
     U.on(root, 'click', '[data-say-all]', function (e, el) {
       U.speak(el.getAttribute('data-say-all').split(', ').join(', '), { rate: 0.9, voiceName: st.settings.voiceName });
     });
@@ -186,15 +240,6 @@
       if (quiz) { P.setAns(quiz.getAttribute('data-quiz') + ':quiz', {}); App.render(); }
     });
 
-    /* 词汇掌握标记 */
-    U.on(root, 'click', '[data-mark]', function (e, el) {
-      var w = el.getAttribute('data-mark');
-      var lv = Store.wordLevel(w);
-      Store.get().wordStat[w] = { m: (lv + 1) % 4, n: 1, t: U.todayISO() };
-      Store.save();
-      el.textContent = ['未学', '模糊', '眼熟', '掌握'][Store.wordLevel(w)];
-    });
-
     /* 计时器 */
     U.on(root, 'click', '[data-timer-min]', function (e, el) {
       var box = root.querySelector('[data-timer]');
@@ -207,15 +252,21 @@
 
     /* 听力播放 */
     var item = currentListening();
+    var list = item ? P.audioListOf(item) : null;
     U.on(root, 'click', '[data-listen]', function (e, el) {
       if (!item) return;
       var mode = el.getAttribute('data-listen');
-      if (mode === 'stop') { U.stopSpeak(); return; }
+      if (mode === 'stop') { U.stopSpeak(); P.stopAudio(); return; }
+      if (list) {
+        P.playList(list, mode === 'slow' ? 0.8 : 1);
+        return;
+      }
       U.speak(item.script, { rate: mode === 'slow' ? 0.72 : st.settings.ttsRate, voiceName: st.settings.voiceName });
     });
     U.on(root, 'click', '[data-listen-one]', function (e, el) {
       if (!item) return;
       var i = +el.getAttribute('data-listen-one');
+      if (list) { P.playList(list, 1, i); return; }
       var s = P.sentences(item.script)[i];
       if (s) U.speak(s, { rate: st.settings.ttsRate, voiceName: st.settings.voiceName });
     });
@@ -253,6 +304,32 @@
       if (box) box.hidden = !box.hidden;
     });
 
+    /* 作文批改 */
+    U.on(root, 'click', '[data-ai-grade]', function (e, el) {
+      var item = Libs.byId(Libs.writing, el.getAttribute('data-ai-grade'));
+      var essayEl = root.querySelector('[data-essay]');
+      var out = root.querySelector('[data-ai-result]');
+      var essay = essayEl ? essayEl.value : '';
+      if (!out) return;
+      out.innerHTML = '<p class="ai-loading">正在批改… DeepSeek 一般需要 10-40 秒，请不要关闭页面。</p>';
+      el.disabled = true;
+      AI.grade(essay, item).then(function (data) {
+        out.innerHTML = renderGrade(data);
+        U.toast('批改完成：' + data.total + ' / 15 分');
+      }).catch(function (err) {
+        out.innerHTML = '<p class="warn">批改失败：' + U.esc(err.message) + '</p>';
+      }).then(function () { el.disabled = false; });
+    });
+    U.on(root, 'click', '[data-rule-check]', function (e, el) {
+      var item = Libs.byId(Libs.writing, el.getAttribute('data-rule-check'));
+      var essayEl = root.querySelector('[data-essay]');
+      var out = root.querySelector('[data-ai-result]');
+      if (!out) return;
+      var essay = essayEl ? essayEl.value : '';
+      if (AI.countWords(essay) < 40) { U.toast('先写至少 40 词再做检查'); return; }
+      out.innerHTML = renderGrade(AI.ruleCheck(essay, item));
+    });
+
     /* 写作与翻译草稿 */
     U.on(root, 'input', '[data-essay]', function (e, el) {
       var key = el.getAttribute('data-essay');
@@ -286,6 +363,7 @@
 
   P.task = taskView;
   P.bind = bind;
+  P.renderGrade = renderGrade;
   P.bindListen = bind;
   P.bindRead = bind;
   P.writeDetail = function (item) { return writePanel(item); };

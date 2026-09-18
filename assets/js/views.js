@@ -23,6 +23,7 @@ window.App = (function () {
     var name = parts[0], arg = parts[1], arg2 = parts[2];
     U.stopSpeak();
     U.stopTimer();
+    if (window.Practice && Practice.stopAudio) Practice.stopAudio();
     var fresh = document.createElement('main');
     fresh.id = 'view';
     fresh.className = 'view';
@@ -467,32 +468,79 @@ window.App = (function () {
         U.enVoices().map(function (v) { return '<option value="' + U.esc(v.name) + '"' + (st.settings.voiceName === v.name ? ' selected' : '') + '>' + U.esc(v.name) + '</option>'; }).join('') + '</select>') +
       '</div><p class="muted small">修改考试日期后，全站计划会自动重新生成，已完成的进度按天数保留。</p></section>';
 
-    html += '<section class="card"><div class="card-head"><h2>跨设备同步</h2><span class="muted small">三种方式任选</span></div>' +
-      '<div class="sync-block"><h3 class="sub">① 同步码（推荐，无需服务器）</h3>' +
-      '<p class="muted small">在 A 设备点“生成同步码”并复制，在 B 设备粘贴后导入即可。数据只在你两台设备之间传递。</p>' +
-      '<div class="row gap"><button class="btn primary" data-make-code>生成同步码</button>' +
+    /* ---------- 作文 AI 批改 ---------- */
+    var ai = st.settings.ai;
+    html += '<section class="card"><div class="card-head"><h2>作文 AI 批改</h2>' +
+      '<span class="muted small">' + (window.AI && AI.ready() ? '已启用' : '未配置') + '</span></div>' +
+      '<p class="muted small">填一次就好：写作练习页会出现「AI 批改」按钮，按四级评分细则给出 15 分制打分、'
+      + '逐句修改建议、词汇升级和改写范文。批改失败或没网时可改用「离线规则检查」。</p>' +
+      '<div class="form-grid">' +
+      field('DeepSeek API Key', '<input class="input" type="password" data-ai="key" value="' + U.esc(ai.key || '') +
+        '" placeholder="sk-...（只保存在本机浏览器）">') +
+      field('模型', '<select class="input" data-ai="model">' +
+        [['deepseek-chat', 'deepseek-chat（推荐：快、便宜、够用）'],
+         ['deepseek-flash', 'deepseek-flash（推理模型，思考更充分但更慢）'],
+         ['deepseek-v4-pro', 'deepseek-v4-pro（更强，费用更高）']].map(function (o) {
+          return '<option value="' + o[0] + '"' + (ai.model === o[0] ? ' selected' : '') + '>' + o[1] + '</option>';
+        }).join('') + '</select>') +
+      field('接口地址', '<input class="input" data-ai="base" value="' + U.esc(ai.base || 'https://api.deepseek.com') + '">') +
+      '</div>' +
+      '<div class="row gap"><button class="btn" data-ai-test>测试连接</button>' +
+      '<span class="muted small" data-ai-status>批改一篇作文约消耗 2000-3000 tokens，成本约几厘到一分钱。</span></div>' +
+      '<p class="muted small">Key 只写进本机浏览器的本地存储，不会进入网站仓库；换设备时在新设备上再填一次即可。</p>' +
+    '</section>';
+
+    /* ---------- 跨设备同步 ---------- */
+    html += '<section class="card"><div class="card-head"><h2>跨设备同步</h2>' +
+      '<span class="muted small">' + U.esc(Store.syncStatus()) + '</span></div>' +
+      '<p class="muted small">开启后不需要再发同步码：电脑上勾选任务，手机会自动合并；手机上背完单词，电脑打开就同步。</p>' +
+      '<div class="form-grid">' +
+      field('同步方式', selectSet('cloudProvider', [['off', '关闭'], ['github', 'GitHub 私有仓库（推荐）'], ['custom', '自定义 REST 接口']], c.provider)) +
+      (c.provider === 'github' ? (
+        field('GitHub 用户名', '<input class="input" data-cloud="owner" value="' + U.esc(c.owner || '') + '" placeholder="例如 zbk-Bk">') +
+        field('仓库名', '<input class="input" data-cloud="repo" value="' + U.esc(c.repo || 'cet4-progress') + '">') +
+        field('文件路径', '<input class="input" data-cloud="path" value="' + U.esc(c.path || 'progress.json') + '">') +
+        field('访问令牌', '<input class="input" type="password" data-cloud="token" value="' + U.esc(c.token || '') + '" placeholder="github_pat_... 或 ghp_...">')
+      ) : (c.provider === 'custom' ? (
+        field('接口地址', '<input class="input" data-cloud="url" value="' + U.esc(c.url || '') + '" placeholder="https://example.com/api/progress">') +
+        field('令牌（可选）', '<input class="input" data-cloud="token" value="' + U.esc(c.token || '') + '">')
+      ) : '')) +
+      '</div>' +
+      (c.provider === 'off' ? '' :
+        '<label class="row gap center" style="margin-top:8px"><input type="checkbox" data-cloud-auto' + (c.auto ? ' checked' : '') +
+        '> 自动同步（勾选任务后 5 秒内上传，打开页面时自动合并）</label>' +
+        '<div class="row gap" style="margin-top:8px"><button class="btn primary" data-cloud-sync>立即同步</button>' +
+        '<button class="btn ghost" data-cloud-test>测试连接</button>' +
+        '<button class="btn ghost" data-cloud-push>仅上传</button>' +
+        '<button class="btn ghost" data-cloud-pull>仅拉取</button></div>' +
+        '<p class="muted small" data-cloud-status>' + U.esc(Store.syncStatus()) + '</p>') +
+
+      (c.provider === 'github' ?
+        '<div class="sync-block"><h3 class="sub">第一次怎么设置（约 2 分钟，只需做一次）</h3>' +
+        '<ol class="points">' +
+        '<li>私有仓库 <b>' + U.esc((c.owner || '你的账号') + '/' + (c.repo || 'cet4-progress')) + '</b> 已经帮你建好了（如果还没建，告诉我一声，我来建）。</li>' +
+        '<li>点下面的按钮打开 GitHub 令牌页面（名称和有效期已预填）。</li>' +
+        '<li>在 <b>Repository access</b> 选 <b>Only select repositories</b>，勾选 <b>' + U.esc(c.repo || 'cet4-progress') + '</b>。</li>' +
+        '<li>在 <b>Permissions → Repository permissions → Contents</b> 选 <b>Read and write</b>。</li>' +
+        '<li>点 <b>Generate token</b>，复制生成的令牌（只显示一次），粘贴到上面的「访问令牌」框。</li>' +
+        '<li>点「测试连接」，看到「可读写」就成功了；再打开「自动同步」。</li>' +
+        '</ol>' +
+        '<div class="row gap"><a class="btn primary" data-open-token-page>打开令牌创建页面</a>' +
+        '<button class="btn ghost" data-copy-token-url>复制该链接</button></div>' +
+        '<p class="muted small">令牌只保存在本机浏览器，用于读写你那个私有仓库；随时可以在 GitHub 上撤销。</p></div>'
+        : '') +
+
+      '<div class="sync-block"><h3 class="sub">备用方式 ①：同步码（不联网也能搬）</h3>' +
+      '<p class="muted small">临时借用别人的设备，或云同步不方便时用这个。</p>' +
+      '<div class="row gap"><button class="btn" data-make-code>生成同步码</button>' +
       '<button class="btn ghost" data-copy-code>复制</button><button class="btn ghost" data-copy-link>复制为链接</button></div>' +
-      '<textarea class="textarea code" rows="4" data-code placeholder="点击“生成同步码”，或在此粘贴另一台设备的同步码"></textarea>' +
+      '<textarea class="textarea code" rows="3" data-code placeholder="点击“生成同步码”，或在此粘贴另一台设备的同步码"></textarea>' +
       '<div class="row gap"><button class="btn" data-apply-merge>合并导入（推荐）</button>' +
       '<button class="btn ghost" data-apply-over>覆盖导入</button></div></div>' +
 
-      '<div class="sync-block"><h3 class="sub">② 导出 / 导入文件</h3>' +
-      '<p class="muted small">导出 JSON 备份文件，可通过微信、网盘传到手机后导入。</p>' +
+      '<div class="sync-block"><h3 class="sub">备用方式 ②：导出 / 导入文件</h3>' +
       '<div class="row gap"><button class="btn" data-export>导出备份文件</button>' +
       '<button class="btn ghost" data-import>选择文件导入</button><input type="file" accept=".json,application/json" data-file hidden></div></div>' +
-
-      '<div class="sync-block"><h3 class="sub">③ 云同步（自动同步，需要你自己准备一个接口地址）</h3>' +
-      '<p class="muted small">填写一个能读写 JSON 的服务地址即可，例如 npoint.io 免费端点，或你自己的服务器接口。开启自动同步后，每次勾选任务都会在 5 秒内上传。</p>' +
-      '<div class="form-grid">' +
-      field('服务类型', selectSet('cloudProvider', [['off', '关闭'], ['npoint', 'npoint.io（免费）'], ['custom', '自定义 REST 接口']], c.provider)) +
-      field('npoint 标识', '<input class="input" data-cloud="key" value="' + U.esc(c.key || '') + '" placeholder="例如 5f1d3c9b2a1f">') +
-      field('自定义地址', '<input class="input" data-cloud="url" value="' + U.esc(c.url || '') + '" placeholder="https://example.com/api/progress">') +
-      field('令牌（可选）', '<input class="input" data-cloud="token" value="' + U.esc(c.token || '') + '" placeholder="Bearer 或 API Key">') +
-      '</div>' +
-      '<label class="row gap center"><input type="checkbox" data-cloud-auto' + (c.auto ? ' checked' : '') + '> 开启自动同步（修改后自动上传）</label>' +
-      '<div class="row gap"><button class="btn" data-cloud-push>立即上传</button>' +
-      '<button class="btn ghost" data-cloud-pull>从云端拉取</button></div>' +
-      '<p class="muted small">上次同步：' + (c.lastSyncAt ? new Date(c.lastSyncAt).toLocaleString() : '从未同步') + '</p></div>' +
     '</section>';
 
     html += '<section class="card"><div class="card-head"><h2>自定义词库</h2><span class="muted small">每行一个：单词 中文释义（可选英文例句）</span></div>' +
@@ -508,16 +556,30 @@ window.App = (function () {
 
     html += '<section class="card"><div class="card-head"><h2>使用说明</h2></div><div class="doc">' +
       '<p><b>1. 每天打开“今日任务”</b>，按清单完成即可，不需要自己安排内容。任务包含词汇、听力、阅读、写作、翻译、语法与复盘。</p>' +
-      '<p><b>2. 听力怎么练：</b>先做题 → 点“逐句播放”精听 → 在听写框里写 → 对照原文标出漏听点。网页使用系统语音朗读，无需下载音频。</p>' +
-      '<p><b>3. 手机使用：</b>用手机浏览器打开同一网址，选择“添加到主屏幕”，即可像 App 一样使用，断网也能打开（需支持离线缓存）。</p>' +
-      '<p><b>4. 进度同步：</b>推荐用同步码在电脑和手机之间搬一次；如果你有自己的服务器或 npoint 地址，可以开启自动云同步。</p>' +
-      '<p><b>5. 模考：</b>冲刺阶段每周安排整套模考，做完在“模考中心”录入各部分得分，系统会估算 710 分制总分并画出趋势。</p>' +
+      '<p><b>2. 听力怎么练：</b>点“播放全文”做题 → 用句子前面的 ▶ 反复精听单句 → 在听写框里写 → 对照原文标出漏听点。音频是按考场风格录制的（新闻与篇章为播音音色，长对话为男女双人对话），没有音频的材料会自动回退到系统朗读。</p>' +
+      '<p><b>3. 作文怎么练：</b>先自己写完，再点“AI 批改”按四级评分细则拿到 15 分制打分、逐句修改建议和改写范文；没配 Key 或没网时可用“离线规则检查”查字数、段落、连接词、重复用词和标点问题。</p>' +
+      '<p><b>4. 进度同步：</b>推荐“GitHub 私有仓库 + 访问令牌”，设置一次之后两边自动同步，不用再发同步码；临时借设备时仍可用同步码或导出文件。</p>' +
+      '<p><b>5. 词汇：</b>词汇库收录四级全量词表，可按“未学/模糊/眼熟/掌握”标记并筛选，每天任务会按遗忘曲线自动安排新词与复习。</p>' +
+      '<p><b>6. 手机使用：</b>用手机浏览器打开同一网址，选择“添加到主屏幕”，即可像 App 一样使用，断网也能打开。</p>' +
+      '<p><b>7. 模考：</b>冲刺阶段每周安排整套模考，做完在“模考中心”录入各部分得分，系统会估算 710 分制总分并画出趋势。</p>' +
     '</div></section>';
     return html;
   }
 
   function field(label, inner) {
     return '<label class="field"><span>' + label + '</span>' + inner + '</label>';
+  }
+
+  /* GitHub 令牌创建页（预填名称、说明、有效期与账号） */
+  function tokenPageUrl() {
+    var c = Store.get().settings.cloud;
+    var q = [
+      'name=' + encodeURIComponent('CET4 四级备考同步'),
+      'description=' + encodeURIComponent('网站用它读写私有仓库里的同步文件'),
+      'expires_in=none'
+    ];
+    if (c.owner) q.push('target_name=' + encodeURIComponent(c.owner));
+    return 'https://github.com/settings/personal-access-tokens/new?' + q.join('&');
   }
   function selectSet(key, opts, val) {
     return '<select class="input" data-set="' + key + '">' + opts.map(function (o) {
@@ -528,6 +590,7 @@ window.App = (function () {
   function bindSettings() {
     U.on(view, 'change', '[data-set]', function (e, el) {
       var k = el.getAttribute('data-set'), v = el.value, st = Store.get();
+      if (k === 'cloudProvider') { st.settings.cloud.provider = v; Store.save(); render(); return; }
       if (k === 'name' || k === 'examDate' || k === 'planStart') st[k] = v;
       else if (k === 'theme' || k === 'voiceName') st.settings[k] = k === 'ttsRate' ? +v : v;
       else if (k === 'ttsRate') st.settings.ttsRate = +v;
@@ -537,14 +600,65 @@ window.App = (function () {
       if (k === 'examDate' || k === 'planStart' || k === 'dailyMinutes') { Plan.reset(); Store.toast('计划已按新设置重新生成'); }
       render();
     });
+    /* 作文 AI 批改 */
+    U.on(view, 'input', '[data-ai]', function (e, el) {
+      Store.get().settings.ai[el.getAttribute('data-ai')] = el.value.trim();
+      Store.save({ silent: true });
+    });
+    U.on(view, 'change', '[data-ai]', function (e, el) {
+      Store.get().settings.ai[el.getAttribute('data-ai')] = el.value.trim();
+      Store.save();
+    });
+    U.on(view, 'click', '[data-ai-test]', function (e, el) {
+      var box = U.qs('[data-ai-status]');
+      if (!window.AI || !AI.ready()) { U.toast('请先填写 API Key'); return; }
+      box.textContent = '正在测试…';
+      el.disabled = true;
+      AI.call([{ role: 'user', content: '只回复两个字：可用' }], { maxTokens: 20, noJson: true })
+        .then(function (r) {
+          box.innerHTML = '<b class="ok">连接成功</b>：' + U.esc(AI.config().model) + ' 回复「' +
+            U.esc((r.choices[0].message.content || '').trim()) + '」';
+        })
+        .catch(function (err) { box.innerHTML = '<b class="bad">连接失败</b>：' + U.esc(err.message); })
+        .then(function () { el.disabled = false; });
+    });
+
+    /* 云同步 */
+    U.on(view, 'input', '[data-cloud]', function (e, el) {
+      Store.get().settings.cloud[el.getAttribute('data-cloud')] = el.value.trim();
+      Store.save({ silent: true });
+    });
     U.on(view, 'change', '[data-cloud]', function (e, el) {
-      Store.get().settings.cloud[el.getAttribute('data-cloud')] = el.value; Store.save();
+      Store.get().settings.cloud[el.getAttribute('data-cloud')] = el.value.trim();
+      Store.save();
     });
     U.on(view, 'change', '[data-cloud-auto]', function (e, el) {
       Store.get().settings.cloud.auto = el.checked; Store.save();
+      U.toast(el.checked ? '自动同步已开启' : '自动同步已关闭');
     });
     U.on(view, 'click', '[data-cloud-push]', function () { Store.pushCloud(false).catch(function () {}); });
-    U.on(view, 'click', '[data-cloud-pull]', function () { Store.pullCloud(false).then(render).catch(function () {}); });
+    U.on(view, 'click', '[data-cloud-pull]', function () { Store.pullCloud(false).then(function () { render(); }).catch(function () {}); });
+    U.on(view, 'click', '[data-cloud-sync]', function (e, el) {
+      el.disabled = true;
+      Store.syncNow(false).then(function () { render(); })
+        .catch(function (err) { U.toast('同步失败：' + err.message); })
+        .then(function () { el.disabled = false; });
+    });
+    U.on(view, 'click', '[data-cloud-test]', function (e, el) {
+      var box = U.qs('[data-cloud-status]');
+      box.textContent = '正在测试…';
+      el.disabled = true;
+      Store.testCloud().then(function (r) {
+        box.innerHTML = r.ok ? '<b class="ok">' + U.esc(r.msg) + '</b>' : '<b class="bad">' + U.esc(r.msg) + '</b>';
+        el.disabled = false;
+      });
+    });
+    U.on(view, 'click', '[data-open-token-page]', function () {
+      window.open(tokenPageUrl(), '_blank', 'noopener');
+    });
+    U.on(view, 'click', '[data-copy-token-url]', function () {
+      U.copy(tokenPageUrl()).then(function (ok) { U.toast(ok ? '链接已复制' : '复制失败，请手动打开 GitHub'); });
+    });
     U.on(view, 'click', '[data-export]', function () {
       U.download('cet4-backup-' + U.todayISO() + '.json', Store.exportJSON());
       U.toast('已导出备份文件');

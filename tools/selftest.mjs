@@ -46,8 +46,9 @@ globalThis.document = {
 };
 
 const files = [
-  'assets/js/data-vocab.js', 'assets/js/data-reading.js', 'assets/js/data-writing.js', 'assets/js/data-skills.js',
-  'assets/js/util.js', 'assets/js/libs.js', 'assets/js/store.js', 'assets/js/plan.js',
+  'assets/js/data-vocab.js', 'assets/js/data-vocab-full.js', 'assets/js/data-reading.js',
+  'assets/js/data-audio.js', 'assets/js/data-writing.js', 'assets/js/data-skills.js',
+  'assets/js/util.js', 'assets/js/libs.js', 'assets/js/store.js', 'assets/js/ai.js', 'assets/js/plan.js',
   'assets/js/practice.js', 'assets/js/practice2.js', 'assets/js/views.js'
 ];
 for (const f of files) vm.runInThisContext(fs.readFileSync(path.join(root, f), 'utf8'), { filename: f });
@@ -65,9 +66,86 @@ function check(name, fn) {
 
 check('题库统计', () => JSON.stringify(Libs.stats()));
 check('词表字段完整', () => {
-  const bad = Libs.vocab.filter((w) => !w.w || !w.zh || !w.en || !w.zhEx);
+  const bad = Libs.vocab.filter((w) => !w.w || !w.zh || !w.pos);
   if (bad.length) throw new Error(bad.length + ' 条词缺字段，例如 ' + JSON.stringify(bad[0]));
-  return Libs.vocab.length + ' 词全部完整';
+  const coreBad = Libs.core.filter((w) => !w.en || !w.zhEx);
+  if (coreBad.length) throw new Error('核心词缺例句：' + coreBad.length + ' 条');
+  const dup = Libs.vocab.length - new Set(Libs.vocab.map((w) => w.w)).size;
+  if (dup > 0) throw new Error('存在重复词 ' + dup + ' 条');
+  const st = Libs.stats();
+  return `全量 ${st.vocab} 词（其中 ${st.withExample} 词带例句，核心 ${st.core} 词），无重复、无缺字段`;
+});
+check('全量词库覆盖 A-Z', () => {
+  const letters = new Set(Libs.vocab.map((w) => w.w[0]));
+  const missing = 'abcdefghijklmnopqrstuvwxyz'.split('').filter((c) => !letters.has(c));
+  if (missing.length > 2) throw new Error('缺少字母：' + missing.join(''));
+  return Libs.vocab.length + ' 词覆盖 ' + letters.size + ' 个首字母（缺失：' + (missing.join('') || '无') + '）';
+});
+check('听力音频清单与文件', () => {
+  const fsx = fs;
+  let segs = 0, bytes = 0, missing = [];
+  Libs.listening.forEach((item) => {
+    const list = (globalThis.CET4_AUDIO || {})[item.id];
+    if (!list || !list.length) { missing.push(item.id + '(无清单)'); return; }
+    list.forEach((seg) => {
+      const p = path.join(root, 'assets', 'audio', seg[0]);
+      if (!fsx.existsSync(p)) { missing.push(seg[0]); return; }
+      segs++;
+      bytes += fsx.statSync(p).size;
+    });
+  });
+  if (missing.length) throw new Error('缺少音频：' + missing.slice(0, 5).join(', '));
+  return `${Libs.listening.length} 篇材料 / ${segs} 段音频 / ${(bytes / 1048576).toFixed(2)} MB`;
+});
+check('作文批改：规则检查', () => {
+  const essay = [
+    'Nowadays many students learn English with short videos, and this trend has both advantages and disadvantages.',
+    'On the one hand, short videos are convenient. Students can review words while waiting for a bus, and lively explanations are easier to remember.',
+    'However, the short format scatters attention, so learners may collect fragments instead of understanding a complete text.',
+    'In my view, we should treat videos as an entrance rather than a destination, and combine them with longer reading.',
+    'Only in this way can convenience turn into real ability, which is what every learner really needs.'
+  ].join('\n\n');
+  const r = AI.ruleCheck(essay, Libs.writing[0]);
+  if (typeof r.total !== 'number' || r.total < 0 || r.total > 15) throw new Error('分数异常 ' + r.total);
+  if (!r.problems || !r.problems.length) throw new Error('未给出问题');
+  return `规则检查得分 ${r.total}/15（${r.level}），列出 ${r.problems.length} 条问题，词数 ${r.wordCount}`;
+});
+check('作文批改：未填 Key 时的状态', () => {
+  if (AI.ready()) throw new Error('未填 Key 时不应就绪');
+  return '未配置 Key → AI 按钮禁用并提示去设置，规则检查仍可用';
+});
+check('作文批改：AI 返回结果的渲染', () => {
+  const sample = {
+    total: 11, level: '11-13 分档', wordCount: 155, source: 'ai', model: 'deepseek-chat',
+    usage: { total_tokens: 2400 },
+    dimensions: {
+      content: { score: 5, max: 6, comment: '切题，论证略单薄' },
+      structure: { score: 2, max: 3, comment: '段落清楚，段间衔接可加强' },
+      language: { score: 3, max: 4, comment: '有少量时态错误' },
+      vocabulary: { score: 1, max: 2, comment: '用词偏简单' }
+    },
+    strengths: ['开头点题明确'],
+    problems: [{ quote: 'I think short videos is useful.', issue: '主谓一致', fix: 'I think short videos are useful.' }],
+    vocabulary: ['important → vital'],
+    rewrite: 'Short videos have become part of campus life.',
+    nextStep: '下次注意主谓一致与连接词'
+  };
+  const html = Practice.renderGrade(sample);
+  ['11', '11-13 分档', '内容与切题', '5/6', '主谓一致', 'important → vital', 'Short videos have become', '下一步']
+    .forEach((k) => { if (html.indexOf(k) < 0) throw new Error('渲染结果里缺少：' + k); });
+  return '分数、四个维度、逐句修改、词汇升级、改写范文、下一步都正常渲染（' + Math.round(html.length / 1024) + 'KB）';
+});
+check('云同步状态与配置校验', () => {
+  const st = Store.get();
+  if (Store.cloudReady()) throw new Error('默认应为未配置');
+  st.settings.cloud.provider = 'github';
+  st.settings.cloud.owner = 'demo'; st.settings.cloud.repo = 'cet4-progress'; st.settings.cloud.token = '';
+  if (Store.cloudReady()) throw new Error('缺令牌时不应就绪');
+  st.settings.cloud.token = 'github_pat_xxx';
+  if (!Store.cloudReady()) throw new Error('配置完整时应就绪');
+  const txt = Store.syncStatus();
+  st.settings.cloud.provider = 'off'; st.settings.cloud.token = '';
+  return '同步状态文案：' + txt;
 });
 check('短语与同义替换', () => Libs.phrases.length + ' 短语 / ' + Libs.synonyms.length + ' 组替换');
 check('计划生成 60 天', () => {

@@ -84,10 +84,56 @@ window.Practice = (function () {
   }
 
   /* ---------- 听力 ---------- */
+  var audio = null;          // 复用的 <audio>
+  var playing = null;        // 当前播放的句子下标
+
+  function audioList(item) {
+    var m = window.CET4_AUDIO || {};
+    return m[item.id] || null;
+  }
+
+  function playList(list, rate, start) {
+    stopAudio();
+    audio = new Audio();
+    audio._chain = true;
+    playAt(list, start || 0, rate || 1);
+  }
+
+  function audioSrc(file) { return 'assets/audio/' + file; }
+
+  function stopAudio() {
+    if (audio) { try { audio.pause(); } catch (e) {} audio = null; }
+    playing = null;
+    U.qsa('.sent-list li').forEach(function (li) { li.classList.remove('playing'); });
+  }
+
+  function playAt(list, i, rate, onEnd) {
+    if (!list || i >= list.length) { stopAudio(); if (onEnd) onEnd(); return; }
+    if (!audio) audio = new Audio();
+    var seg = list[i];
+    audio.src = audioSrc(seg[0]);
+    audio.playbackRate = rate || 1;
+    playing = i;
+    U.qsa('.sent-list li').forEach(function (li) {
+      li.classList.toggle('playing', +li.getAttribute('data-sent') === i);
+    });
+    audio.onended = function () {
+      if (audio._chain) playAt(list, i + 1, rate, onEnd);
+      else { playing = null; U.qsa('.sent-list li').forEach(function (li) { li.classList.remove('playing'); }); }
+    };
+    audio.play().catch(function (e) {
+      U.toast('音频播放被浏览器拦截或文件缺失，已改用系统朗读');
+      stopAudio();
+      U.speak(seg[2], { rate: Store.get().settings.ttsRate, voiceName: Store.get().settings.voiceName });
+    });
+  }
+
   function listenDetail(item, ctx) {
     if (!item) return '<div class="card"><p>听力材料不存在</p></div>';
     ctx = ctx || 'listen-' + item.id;
-    var sents = sentences(item.script);
+    var list = audioList(item);
+    var sents = list ? list.map(function (x) { return x[2]; }) : sentences(item.script);
+    var speakers = list ? list.map(function (x) { return x[1]; }) : null;
     var typeName = { news: '短篇新闻', conversation: '长对话', passage: '听力篇章' }[item.type];
     var html = '';
 
@@ -95,14 +141,18 @@ window.Practice = (function () {
     html += section('播放与精听',
       '<div class="player">' +
         '<button class="btn primary" data-listen="all">▶ 播放全文</button>' +
-        '<button class="btn ghost" data-listen="slow">🐢 慢速播放</button>' +
+        '<button class="btn ghost" data-listen="slow">🐢 慢速播放（0.8 倍）</button>' +
         '<button class="btn ghost" data-listen="stop">■ 停止</button>' +
-        '<span class="muted small">语速可在设置里调整；使用系统语音朗读，无需下载音频</span>' +
+        '<span class="muted small">' + (list ? '考场风格录音（' + (item.type === 'conversation' ? '男声 + 女声对话' : '播音音色') + '，语速接近真题）'
+          : '本材料暂无录音文件，使用系统语音朗读') + '</span>' +
       '</div>' +
       '<ol class="sent-list">' + sents.map(function (s, i) {
-        return '<li><button class="icon-btn" data-listen-one="' + i + '">▶</button><span>' + U.esc(s) + '</span></li>';
+        var who = speakers && speakers[i] ? '<em class="speaker">' + (speakers[i] === 'M' ? '男' : '女') + '</em>' : '';
+        return '<li data-sent="' + i + '"><button class="icon-btn" data-listen-one="' + i + '">▶</button>' +
+          who + '<span>' + U.esc(s) + '</span></li>';
       }).join('') + '</ol>' +
-      '<div class="card-foot"><button class="btn ghost small" data-toggle-script>显示 / 隐藏听力原文</button></div>' +
+      '<div class="card-foot"><button class="btn ghost small" data-toggle-script>显示 / 隐藏听力原文</button>' +
+      '<span class="muted small">点句子前面的 ▶ 可以反复精听同一句</span></div>' +
       '<div class="script" hidden data-script>' + U.esc(item.script.split('\n').join(' ')) +
         '<p class="muted small">参考译文：' + U.esc(item.zh) + '</p></div>');
 
@@ -151,14 +201,16 @@ window.Practice = (function () {
     var st = Store.get();
     var all = Libs.allVocab();
     var mastered = Store.masteredWords();
+    var s = Libs.stats();
     var html = '<div class="page-head"><h1>词汇库</h1>' +
-      '<p class="muted">共 ' + all.length + ' 词（内置 ' + Libs.vocab.length + ' + 自定义 ' + st.customWords.length + '）· ' +
-      '已标记掌握 ' + mastered + ' 个 · 背完可在设置里导入自己的词表</p></div>';
+      '<p class="muted">共 ' + all.length + ' 词（四级全量词表 ' + s.vocab + ' 词，其中 ' + s.withExample +
+      ' 个带例句；自定义 ' + st.customWords.length + ' 个）· 已标记掌握 ' + mastered +
+      ' 个 · 也可以导入自己在背的词表</p></div>';
     html += '<section class="card"><div class="card-head"><h2>查询与筛选</h2></div>' +
       '<div class="row gap"><input class="input" data-search placeholder="输入英文单词或中文释义搜索" style="max-width:320px">' +
       '<div class="seg" data-seg="wordFilter"><button class="active" data-f="all">全部</button><button data-f="new">未学</button>' +
       '<button data-f="fuzzy">模糊</button><button data-f="known">已掌握</button></div>' +
-      '<button class="btn ghost small" data-review-weak>进入错词复习</button></div>' +
+      '<button class="btn ghost small" data-review-weak>只复习没掌握的词</button></div>' +
       '<div id="wordBody"></div></section>';
     html += '<section class="card"><div class="card-head"><h2>高频短语与同义替换</h2></div>' +
       '<div class="chips">' + Libs.phrases.slice(0, 20).map(function (p) {
@@ -172,7 +224,7 @@ window.Practice = (function () {
     return html;
   }
 
-  function wordTable(query, filter) {
+  function wordTable(query, filter, limit) {
     var list = Libs.search(query);
     if (filter && filter !== 'all') {
       list = list.filter(function (w) {
@@ -183,7 +235,8 @@ window.Practice = (function () {
         return true;
       });
     }
-    var shown = list.slice(0, 120);
+    var size = limit || 80;
+    var shown = list.slice(0, size);
     return '<div class="table-wrap"><table class="table words"><thead><tr><th>单词</th><th>词性</th><th>释义</th><th>例句</th><th>掌握</th></tr></thead><tbody>' +
       shown.map(function (w) {
         var lv = Store.wordLevel(w.w);
@@ -191,25 +244,54 @@ window.Practice = (function () {
           '<td>' + U.esc(w.zh) + '</td><td class="ex">' + U.esc(w.en || '') + '<br><span class="muted">' + U.esc(w.zhEx || '') + '</span></td>' +
           '<td><button class="lvl" data-mark="' + U.esc(w.w) + '">' + ['未学', '模糊', '眼熟', '掌握'][lv] + '</button></td></tr>';
       }).join('') + '</tbody></table></div>' +
-      '<p class="muted small">共匹配 ' + list.length + ' 词，显示前 ' + shown.length + ' 条。点击“未学/模糊/掌握”按钮可循环标记。</p>';
+      '<div class="card-foot"><span class="muted small">共匹配 ' + list.length + ' 词，已显示 ' + shown.length + ' 条' +
+      '（点击单词旁的喇叭可朗读，点“未学/模糊/掌握”循环标记）</span>' +
+      (list.length > shown.length ? '<button class="btn small" data-more>加载更多</button>' : '') + '</div>';
+  }
+
+  /* 词汇相关的通用事件：朗读 + 掌握标记 */
+  function bindWordTools(root) {
+    root = root || document.getElementById('view');
+    U.on(root, 'click', '[data-say]', function (e, el) {
+      U.speak(el.getAttribute('data-say'), {
+        rate: Store.get().settings.ttsRate, voiceName: Store.get().settings.voiceName
+      });
+    });
+    U.on(root, 'click', '[data-mark]', function (e, el) {
+      var w = el.getAttribute('data-mark');
+      var lv = Store.wordLevel(w);
+      Store.get().wordStat[w] = { m: (lv + 1) % 4, n: 1, t: U.todayISO() };
+      Store.save();
+      el.textContent = ['未学', '模糊', '眼熟', '掌握'][Store.wordLevel(w)];
+    });
   }
 
   function bindVocabLib() {
-    var state = { q: '', f: 'all' };
-    function refresh() { U.qs('#wordBody').innerHTML = wordTable(state.q, state.f); }
+    var state = { q: '', f: 'all', limit: 80 };
+    function refresh() { U.qs('#wordBody').innerHTML = wordTable(state.q, state.f, state.limit); }
     refresh();
-    U.on(document.getElementById('view'), 'input', '[data-search]', function (e, el) { state.q = el.value; refresh(); });
-    U.on(document.getElementById('view'), 'click', '[data-seg="wordFilter"] button', function (e, el) {
+    var root = document.getElementById('view');
+    U.on(root, 'input', '[data-search]', function (e, el) { state.q = el.value; state.limit = 80; refresh(); });
+    U.on(root, 'click', '[data-seg="wordFilter"] button', function (e, el) {
       state.f = el.getAttribute('data-f');
+      state.limit = 80;
       U.qsa('[data-seg="wordFilter"] button').forEach(function (b) { b.classList.toggle('active', b === el); });
       refresh();
     });
+    U.on(root, 'click', '[data-more]', function () { state.limit += 80; refresh(); });
+    U.on(root, 'click', '[data-review-weak]', function () {
+      state.f = 'fuzzy';
+      U.qsa('[data-seg="wordFilter"] button').forEach(function (b) { b.classList.toggle('active', b.getAttribute('data-f') === 'fuzzy'); });
+      refresh();
+    });
+    bindWordTools(root);
   }
 
   return {
     vocabPanel: vocabPanel, listenDetail: listenDetail, readDetail: readDetail,
     vocabLib: vocabLib, bindVocabLib: bindVocabLib, wordTable: wordTable,
     answers: answers, getAns: getAns, setAns: setAns, answerCard: answerCard,
-    section: section, speakBtn: speakBtn, sentences: sentences
+    section: section, speakBtn: speakBtn, sentences: sentences,
+    stopAudio: stopAudio, playList: playList, audioListOf: audioList, bindWordTools: bindWordTools
   };
 })();
